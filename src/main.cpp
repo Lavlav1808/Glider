@@ -4,71 +4,12 @@
 #include <sstream>
 #include <vector>
 
-enum class TokenType {
-    _return,
-    int_literal,
-    semi
-};
-
-struct Token {
-    TokenType type;
-    std::optional<std::string> value {};
-};
-
-std::vector<Token> tokenize(const std::string& str) {
-    std::vector<Token> tokens;
-
-    std::string buffer;
-    for (int i = 0; i < str.length(); i++) {
-        char c = str.at(i);
-        if (std::isalpha(c)) {
-            buffer.push_back(c);
-            i++;
-            while (std::isalnum(str.at(i))) {
-                buffer.push_back(str.at(i));
-                i++;
-            }
-            i--;
-
-            if (buffer == "return") {
-                tokens.push_back({.type = TokenType::_return});
-                buffer.clear();
-                continue;
-            } else {
-                std::cerr << "Unexpected token type: " << buffer << std::endl;
-                exit(EXIT_FAILURE);
-            }
-        }
-        else if (isdigit(c)) {
-            buffer.push_back(c);
-            i++;
-            while (isdigit(str.at(i))) {
-                buffer.push_back(str.at(i));
-                i++;
-            }
-            i--;
-            tokens.push_back({.type = TokenType::int_literal, .value = buffer});
-            buffer.clear();
-        }
-        else if (c == ';') {
-            tokens.push_back({.type = TokenType::semi});
-        }
-        else if (std::isspace(c)) {
-            continue;
-        }
-        else {
-            std::cerr << "Unexpected token type: " << buffer << std::endl;
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    return  tokens;
-};
+#include "./tokenization.hpp"
 
 std::string token_type_to_string(TokenType type) {
     switch (type) {
-        case TokenType::_return:
-            return "_return";
+        case TokenType::exitcode:
+            return "exitcode";
         case TokenType::int_literal:
             return "int_literal";
         case TokenType::semi:
@@ -80,9 +21,9 @@ std::string token_type_to_string(TokenType type) {
 std::string tokens_to_asm(const std::vector<Token>& tokens) {
     std::stringstream output;
     output << "global _start\n_start:\n";
-    for (int i = 0; i < tokens.size(); i++) {
+    for (size_t i = 0; i < tokens.size(); i++) {
         const Token& token = tokens.at(i);
-        if (token.type == TokenType::_return) {
+        if (token.type == TokenType::exitcode) {
             if (i + 1 < tokens.size() && tokens.at(i + 1).type == TokenType::int_literal) {
                 if (i + 2 < tokens.size() && tokens.at(i + 2).type == TokenType::semi) {
                     output << "    mov rax, 60\n";
@@ -110,17 +51,24 @@ int main(int argc, char* argv[]) {
         contents = content_stream.str();
     }
 
-    std::vector<Token> tokens = tokenize(contents);
-
-    for (const auto& token : tokens) {
-        std::cout << "Token { type: " << token_type_to_string(token.type);
-        if (token.value.has_value()) {
-            std::cout << ", value: '" << token.value.value() << "'";
-        }
-        std::cout << " }" << std::endl;
-    }
+    Tokenizer tokenizer(std::move(contents));
+    std::vector<Token> tokens = tokenizer.tokenize();
 
     std::cout << tokens_to_asm(tokens) << std::endl;
 
+    {
+        std::fstream file("out.asm", std::ios_base::out);
+        file << tokens_to_asm(tokens);
+    }
+
+    if (system("nasm -felf64 out.asm") != 0) {
+        std::cerr << "Error: nasm command failed." << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (system("ld -o out out.o") != 0) {
+        std::cerr << "Error: ld command failed." << std::endl;
+        return EXIT_FAILURE;
+    }
+    
     return EXIT_SUCCESS;
 }
